@@ -1,12 +1,12 @@
 # SET THIS CONNECTION STRING TO GENERATE THE EXPECTED OUTPUT FILE
-fileGenerator_URL = 
-fileGenerator_port = 
-fileGenerator_databaseName = 
-fileGenerator_user = 
-fileGenerator_password = 
-
+fileGenerator_URL = localhost
+fileGenerator_port = 1433
+fileGenerator_databaseName = master
+fileGenerator_user = jdbc_user
+fileGenerator_password = 12345678
+compareWithFile = true
 # PATH TO INPUT TEST FILES FOLDER
-inputFilesPath = ./input
+inputFilesPath = ./input/cursors
 
 # SPECIFY IF YOU WISH TO EXECUTE TEST FILES SEQUENTIALLY OR IN PARALLEL(FALSE FOR ISOLATION TESTS)
 runInParallel = false
@@ -17,7 +17,7 @@ printLogsToConsole = true
 # SPECIFY WHICH JDBC DRIVER TO USE. CHOOSE FROM "pyodbc" OR "pymssql"
 driver = pyodbc
 
-provider = ODBC Driver 17 for SQL Server
+provider = ODBC Driver 18 for SQL Server
 
 # SPECIFY IF YOU WANT TO GENERATE A PERFORMANCE REPORT
 performanceTest = false

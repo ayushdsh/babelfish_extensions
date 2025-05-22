@@ -55,6 +55,12 @@ GO
 alter role db_securityadmin add member userof_testloginwithsecurityadmin2
 GO
 
+create login testloginwithotherdefdb with password = '12345678', default_database = sp_helplogins_db1
+GO
+
+create user u_testloginwithotherdefdb for login testloginwithotherdefdb
+GO
+
 -- psql
 
 
@@ -70,9 +76,8 @@ GO
 -- since this is a server level proc, we need to filter out only results with objects which are created within the scope of this test
 -- in order to avoid interference with other tests
 -- hence adding filter conditions on logins, users and db_name
--- logins = ['jdbc_user', 'sp_helplogins_testlogin', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin']
+-- logins = ['jdbc_user', 'sp_helplogins_testlogin', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin', 'testloginwithotherdefdb']
 -- dbs = ['sp_helplogins_db1', 'master', 'msdb', 'tempdb']
--- users = ['userof_sp_helplogins_testlogin', 'userof_testloginwithsecurityadmin_indb1', 'userof_testloginwithsecurityadmin', 'userof_testloginwithsecurityadmin2', 'userof_testloginindb1']
 create procedure sys.sp_helplogins_vu_test(IN "@loginname" sys.sysname DEFAULT NULL)
 language pltsql
 as $$
@@ -93,11 +98,11 @@ begin
     SET NOCOUNT OFF;
     
     select loginname, DefDBName, DefLangName, AUser, ARemote from #sp_helplogins_internal_logins_temp
-    where loginname in ('jdbc_user', 'sp_helplogins_testlogin', 'testloginwithsecurityadmin3', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin') and
+    where loginname in ('jdbc_user', 'sp_helplogins_testlogin', 'testloginwithsecurityadmin3', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin', 'testloginwithotherdefdb') and
           DefDBName in ('sp_helplogins_db2', 'sp_helplogins_db1', 'master', 'msdb', 'tempdb')
     order by loginname;
     select * FROM #sp_helplogins_internal_user_mappings_temp
-    where loginname in ('jdbc_user', 'sp_helplogins_testlogin', 'testloginwithsecurityadmin3', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin') and
+    where loginname in ('jdbc_user', 'sp_helplogins_testlogin', 'testloginwithsecurityadmin3', 'testloginindb1', 'testloginwithsecurityadmin2', 'testloginwithoutusers', 'testloginwithsecurityadmin', 'testloginwithotherdefdb') and
           DBName in ('sp_helplogins_db2', 'sp_helplogins_db1', 'master', 'msdb', 'tempdb')
     order by loginname;
 	END
@@ -130,6 +135,7 @@ varchar#!#varchar#!#varchar#!#nvarchar#!#nvarchar
 jdbc_user#!#master#!#English#!#YES#!#NO
 sp_helplogins_testlogin#!#master#!#English#!#YES#!#NO
 testloginindb1#!#master#!#English#!#YES#!#NO
+testloginwithotherdefdb#!#sp_helplogins_db1#!#English#!#YES#!#NO
 testloginwithoutusers#!#master#!#English#!#NO#!#NO
 testloginwithsecurityadmin#!#master#!#English#!#YES#!#NO
 testloginwithsecurityadmin2#!#master#!#English#!#YES#!#NO
@@ -148,6 +154,7 @@ jdbc_user#!#tempdb#!#dbo#!#User
 sp_helplogins_testlogin#!#master#!#db_securityadmin#!#Member of
 sp_helplogins_testlogin#!#master#!#userof_sp_helplogins_testlogin#!#User
 testloginindb1#!#sp_helplogins_db1#!#userof_testloginindb1#!#User
+testloginwithotherdefdb#!#sp_helplogins_db1#!#u_testloginwithotherdefdb#!#User
 testloginwithsecurityadmin#!#master#!#userof_testloginwithsecurityadmin#!#User
 testloginwithsecurityadmin#!#sp_helplogins_db1#!#userof_testloginwithsecurityadmin_indb1#!#User
 testloginwithsecurityadmin2#!#sp_helplogins_db1#!#db_securityadmin#!#Member of
@@ -171,6 +178,7 @@ varchar#!#varchar#!#varchar#!#nvarchar#!#nvarchar
 jdbc_user#!#master#!#English#!#YES#!#NO
 sp_helplogins_testlogin#!#master#!#English#!#YES#!#NO
 testloginindb1#!#master#!#English#!#YES#!#NO
+testloginwithotherdefdb#!#sp_helplogins_db1#!#English#!#YES#!#NO
 testloginwithoutusers#!#master#!#English#!#NO#!#NO
 testloginwithsecurityadmin#!#master#!#English#!#YES#!#NO
 testloginwithsecurityadmin2#!#master#!#English#!#YES#!#NO
@@ -199,6 +207,7 @@ varchar#!#varchar#!#varchar#!#nvarchar#!#nvarchar
 jdbc_user#!#master#!#English#!#YES#!#NO
 sp_helplogins_testlogin#!#master#!#English#!#YES#!#NO
 testloginindb1#!#master#!#English#!#YES#!#NO
+testloginwithotherdefdb#!#sp_helplogins_db1#!#English#!#YES#!#NO
 testloginwithoutusers#!#master#!#English#!#NO#!#NO
 testloginwithsecurityadmin#!#master#!#English#!#YES#!#NO
 testloginwithsecurityadmin2#!#master#!#English#!#YES#!#NO
@@ -215,6 +224,7 @@ jdbc_user#!#sp_helplogins_db1#!#dbo#!#User
 jdbc_user#!#tempdb#!#db_owner#!#Member of
 jdbc_user#!#tempdb#!#dbo#!#User
 testloginindb1#!#sp_helplogins_db1#!#userof_testloginindb1#!#User
+testloginwithotherdefdb#!#sp_helplogins_db1#!#u_testloginwithotherdefdb#!#User
 testloginwithsecurityadmin#!#sp_helplogins_db1#!#userof_testloginwithsecurityadmin_indb1#!#User
 testloginwithsecurityadmin2#!#sp_helplogins_db1#!#db_securityadmin#!#Member of
 testloginwithsecurityadmin2#!#sp_helplogins_db1#!#userof_testloginwithsecurityadmin2#!#User
