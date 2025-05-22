@@ -3765,39 +3765,33 @@ BEGIN
         RETURN 0;
     END
 
-	WITH all_database_users(oid)
-	AS
-	(
-		SELECT DISTINCT
-			CASE 
-				WHEN Ext.orig_username = 'dbo' THEN Base3.oid
-				WHEN Ext.orig_username = 'guest' THEN 0
-				ELSE Base2.oid
-			END AS oid
-		FROM pg_catalog.pg_roles AS Base INNER JOIN sys.babelfish_authid_user_ext AS Ext
-		ON Base.rolname = Ext.rolname
-		LEFT OUTER JOIN pg_catalog.pg_roles Base2
-		ON Ext.login_name = Base2.rolname
-		LEFT OUTER JOIN sys.babelfish_sysdatabases AS Db
-		ON Ext.database_name COLLATE database_default = Db.name
-		LEFT OUTER JOIN pg_catalog.pg_roles AS Base3
-		ON Db.owner = Base3.rolname
-		WHERE Ext.type != 'R' AND Ext.orig_username IS NOT NULL
-	)
-
 	SELECT
         CAST(LExt.orig_loginname AS sys.SYSNAME) AS LoginName,
         CAST(CAST(Base.oid AS INT) AS sys.varbinary(85)) AS sid,
         CAST(LExt.default_database_name AS SYS.SYSNAME) AS DefDBName,
         CAST(LExt.default_language_name AS SYS.SYSNAME) AS DefLangName,
         CASE
-            WHEN Dp.oid IS NOT NULL THEN 'YES'
+            WHEN 
+			CASE 
+				WHEN Ext.orig_username = 'dbo' THEN Base3.oid
+				WHEN Ext.orig_username = 'guest' THEN 0
+				ELSE Base2.oid
+			END
+			IS NOT NULL THEN 'YES'
             ELSE 'NO'
         END as AUser,
         'NO' AS ARemote -- Currently we do not support linking local logins to remote logins
     FROM pg_catalog.pg_roles AS Base 
-    INNER JOIN sys.babelfish_authid_login_ext AS LExt ON Base.rolname = LExt.rolname
-    LEFT JOIN all_database_users Dp ON Dp.oid = Base.oid -- In order to find out if a login has any users associated with it
+    INNER JOIN sys.babelfish_authid_login_ext AS LExt 
+	ON Base.rolname = LExt.rolname
+	LEFT JOIN sys.babelfish_authid_user_ext AS Ext
+	ON Base.rolname = Ext.login_name
+	LEFT OUTER JOIN pg_catalog.pg_roles Base2
+	ON Ext.login_name = Base2.rolname
+	LEFT OUTER JOIN sys.babelfish_sysdatabases AS Db
+	ON Ext.database_name COLLATE database_default = Db.name
+	LEFT OUTER JOIN pg_catalog.pg_roles AS Base3
+	ON Db.owner = Base3.rolname
     WHERE LExt.type NOT IN ('R', 'Z');
 
 	RETURN 0;
