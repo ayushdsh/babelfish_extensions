@@ -3799,10 +3799,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE sys.sp_helplogins_internal_user_mappings() 
-=======
 CREATE OR REPLACE PROCEDURE sys.sp_helplogins(IN "@loginname" sys.sysname DEFAULT NULL)
->>>>>>> Stashed changes
 LANGUAGE pltsql
 AS $$
 DECLARE @input_loginname sys.sysname;
@@ -3816,99 +3813,6 @@ BEGIN
 		RETURN 0;
     END
 
-<<<<<<< Updated upstream
-	SET @current_username = LOWER(sys.suser_name());
-	SET @is_sysadmin = is_srvrolemember('sysadmin');
-
-	WITH db_role_mapping(database_name, member_login)
-	AS
-	(
-		SELECT
-			UExt2.database_name as database_name,
-			UExt2.login_name as member_login
-		FROM pg_catalog.pg_auth_members AS Authmbr
-		INNER JOIN pg_catalog.pg_roles AS PGR1 ON PGR1.oid = Authmbr.roleid
-		INNER JOIN pg_catalog.pg_roles AS PGR2 ON PGR2.oid = Authmbr.member
-		INNER JOIN sys.babelfish_authid_user_ext AS UExt1 ON PGR1.rolname = UExt1.rolname
-		INNER JOIN sys.babelfish_authid_user_ext AS UExt2 ON PGR2.rolname = UExt2.rolname
-		WHERE UExt1.orig_username IN ('db_securityadmin', 'db_accessadmin')
-	)
-
-	SELECT
-        CAST(COALESCE(NULLIF(UExt.login_name, ''), Db.owner) AS sys.SYSNAME) AS LoginName,
-		CAST(UExt.database_name AS sys.SYSNAME) AS DBName,
-		CAST(UExt.orig_username AS SYS.SYSNAME) AS UserName,
-		'User' AS UserOrAlias 
-    FROM sys.babelfish_authid_user_ext UExt
-    LEFT JOIN sys.babelfish_sysdatabases Db ON Db.name = UExt.database_name COLLATE database_default
-    WHERE UExt.type != 'R' AND  
-		  UExt.orig_username != 'guest' AND 
-		  has_dbaccess(UExt.database_name) = 1 AND
-        (
-            @is_sysadmin = 1 OR
-			UExt.login_name = @current_username OR
-			ISNULL(UExt.login_name, '') = '' OR
-			EXISTS (SELECT 1 from db_role_mapping WHERE database_name = UExt.database_name AND member_login = @current_username)
-        )
-    UNION
-    SELECT
-		CAST(COALESCE(NULLIF(UExt2.login_name, ''), Db.owner) AS sys.SYSNAME) AS LoginName,
-        CAST(UExt2.database_name AS sys.SYSNAME) AS DBName,
-        CAST(UExt1.orig_username AS SYS.SYSNAME) AS UserName,
-        'Member of' AS UserOrAlias 
-    FROM pg_catalog.pg_auth_members AS Authmbr
-    INNER JOIN pg_catalog.pg_roles AS PGR1 ON PGR1.oid = Authmbr.roleid
-    INNER JOIN pg_catalog.pg_roles AS PGR2 ON PGR2.oid = Authmbr.member
-    INNER JOIN sys.babelfish_authid_user_ext AS UExt1 ON PGR1.rolname = UExt1.rolname AND UExt1.type = 'R'
-    INNER JOIN sys.babelfish_authid_user_ext AS UExt2 ON PGR2.rolname = UExt2.rolname AND UExt2.orig_username != 'db_owner'
-    LEFT JOIN sys.babelfish_sysdatabases Db ON Db.name = UExt1.database_name COLLATE database_default
-    WHERE has_dbaccess(UExt2.database_name) = 1 AND
-		(
-		    @is_sysadmin = 1 OR
-			UExt2.login_name = @current_username OR
-			ISNULL(UExt2.login_name, '') = ''
-		)
-	RETURN 0;
-END;
-$$;
-
-CREATE OR REPLACE PROCEDURE sys.sp_helplogins(IN "@loginname" sys.sysname DEFAULT NULL)
-LANGUAGE pltsql
-AS $$
-DECLARE @input_loginname sys.sysname;
-BEGIN
-
-	IF is_srvrolemember('securityadmin') = 0 
-    BEGIN
-        RAISERROR('User does not have permission to perform this action.', 16, 1);
-		RETURN 0;
-    END
-
-	IF @loginname IS NULL
-	BEGIN
-		EXEC sp_helplogins_internal_logins;
-		EXEC sp_helplogins_internal_user_mappings;
-	END
-	ELSE
-	BEGIN
-		SET @input_loginname = sys.RTRIM(@loginname);
-		SET NOCOUNT ON;
-
-		CREATE TABLE #sp_helplogins_internal_logins_temp(LoginName sys.sysname, sid sys.varbinary(85), DefDBName sys.sysname, DefLangName sys.sysname, AUser sys.nvarchar(8), ARemote sys.nvarchar(8))
-		INSERT INTO #sp_helplogins_internal_logins_temp EXEC sp_helplogins_internal_logins;
-
-		CREATE TABLE #sp_helplogins_internal_user_mappings_temp(LoginName sys.sysname, DBName sys.sysname, UserName sys.sysname, UserOrAlias sys.nvarchar(16))
-		INSERT INTO #sp_helplogins_internal_user_mappings_temp EXEC sp_helplogins_internal_user_mappings;
-
-		SET NOCOUNT OFF;
-
-		SELECT * FROM #sp_helplogins_internal_logins_temp
-		WHERE LoginName = @input_loginname;
-
-		SELECT * FROM #sp_helplogins_internal_user_mappings_temp
-		WHERE LoginName = @input_loginname;
-	END;
-=======
     SET @current_username = LOWER(sys.suser_name());
     SET @is_sysadmin = is_srvrolemember('sysadmin');
     
@@ -4027,7 +3931,6 @@ BEGIN
             COALESCE(NULLIF(UExt2.login_name, ''), Db.owner) = @input_loginname
 
     END;
->>>>>>> Stashed changes
   RETURN 0;
 END;
 $$;
