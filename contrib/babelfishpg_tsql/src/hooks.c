@@ -16,7 +16,10 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_attrdef_d.h"
+#include "catalog/pg_attrdef.h"
 #include "catalog/pg_authid.h"
+#include "catalog/pg_constraint.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_depend.h"	/* Required in handle_bbf_view_binding_on_object_drop to access pg_rewrite dependencies */
 #include "catalog/pg_namespace.h"
@@ -27,6 +30,7 @@
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pg_sequence.h"
 #include "commands/copy.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
@@ -76,6 +80,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/numeric.h"
+#include "utils/queryenvironment.h"
 #include <math.h>
 #include "pgstat.h"
 #include "executor/nodeFunctionscan.h"
@@ -268,6 +273,9 @@ static Oid 	pltsql_GetNewTempOidWithIndex(Relation relation, Oid indexId, AttrNu
 static bool set_and_persist_temp_oid_buffer_start(Oid new_oid);
 static bool pltsql_is_local_only_inval_msg(const SharedInvalidationMessage *msg);
 static EphemeralNamedRelation pltsql_get_tsql_enr_from_oid(Oid oid);
+static EphemeralNamedRelation find_object_in_enr(Oid catalog_oid, Oid object_id);
+static bool verify_stmt_alterdatabaseset(Node* n, const char* dbname, const char* config);
+PG_FUNCTION_INFO_V1(persist_temp_oid_buffer_start_internal);
 
 /*********************************************************
  * 			Weak Binding Views Related Declarations
@@ -309,6 +317,7 @@ static GetNewTempObjectId_hook_type prev_GetNewTempObjectId_hook = NULL;
 static GetNewTempOidWithIndex_hook_type prev_GetNewTempOidWithIndex_hook = NULL;
 static pltsql_is_local_only_inval_msg_hook_type prev_pltsql_is_local_only_inval_msg_hook = NULL;
 static pltsql_get_tsql_enr_from_oid_hook_type prev_pltsql_get_tsql_enr_from_oid_hook = NULL;
+static find_object_in_enr_hook_type prev_find_object_in_enr_hook = NULL;
 static inherit_view_constraints_from_table_hook_type prev_inherit_view_constraints_from_table = NULL;
 static bbfViewHasInsteadofTrigger_hook_type prev_bbfViewHasInsteadofTrigger_hook = NULL;
 static adjust_numeric_result_hook_type prev_adjust_numeric_result_hook = NULL;
@@ -453,6 +462,9 @@ InstallExtendedHooks(void)
 
 	prev_pltsql_get_tsql_enr_from_oid_hook = pltsql_get_tsql_enr_from_oid_hook;
 	pltsql_get_tsql_enr_from_oid_hook = pltsql_get_tsql_enr_from_oid;
+
+	prev_find_object_in_enr_hook = find_object_in_enr_hook;
+	find_object_in_enr_hook = find_object_in_enr;
 
 	prev_inherit_view_constraints_from_table = inherit_view_constraints_from_table_hook;
 	inherit_view_constraints_from_table_hook = preserve_view_constraints_from_base_table;
@@ -640,6 +652,7 @@ UninstallExtendedHooks(void)
 	GetNewObjectId_hook = prev_GetNewObjectId_hook;
 	GetNewTempObjectId_hook = prev_GetNewTempObjectId_hook;
 	GetNewTempOidWithIndex_hook = prev_GetNewTempOidWithIndex_hook;
+	find_object_in_enr_hook = prev_find_object_in_enr_hook;
 	inherit_view_constraints_from_table_hook = prev_inherit_view_constraints_from_table;
 	bbfViewHasInsteadofTrigger_hook = prev_bbfViewHasInsteadofTrigger_hook;
 	adjust_numeric_result_hook = prev_adjust_numeric_result_hook;
@@ -7786,42 +7799,117 @@ find_all_view_references(Node *node, List **view_oids)
 									QTW_EXAMINE_RTES_BEFORE);
 }
 
-static Node*
-tsql_set_typmod_aggref(ParseState *pstate, Node *AggExp)
+/*
+ * For find_object_in_enr_hook
+ *
+ * Returns the ENR in which the given object (denoted by its catalog oid and object id)
+ * exists. Based on the catalog we are searching the object in, the search criteria changes.
+ */
+static EphemeralNamedRelation
+find_object_in_enr(Oid catalog_oid, Oid object_id)
 {
-	Aggref		*aggref = (Aggref *) AggExp;
-	char		*aggFuncName = get_func_name(aggref->aggfnoid);
+	QueryEnvironment 		*queryEnv = currentQueryEnv;
+	ListCell         		*curlc;
+	EphemeralNamedRelation	enr;
 
-	/* Handle MIN/MAX for char/nchar types to preserve typmod */
-	if (aggref->args && aggFuncName && strlen(aggFuncName) == 3 &&
-		(strncmp(aggFuncName, "min", 3) == 0 || strncmp(aggFuncName, "max", 3) == 0) &&
-		((*common_utility_plugin_ptr->is_tsql_bpchar_datatype)(aggref->aggtype) ||
-		 (*common_utility_plugin_ptr->is_tsql_nchar_datatype)(aggref->aggtype)))
+	while (queryEnv)
 	{
-		TargetEntry	*te = (TargetEntry *) linitial(aggref->args);
-		Oid			expr_type = exprType((Node *) te->expr);
+		switch (catalog_oid) {
+			case RelationRelationId:
+				{
+					if ((enr = get_ENR_withoid(queryEnv, object_id, ENR_TSQL_TEMP, false)))
+						return enr;
+					break;
+				}
+			case TypeRelationId:
+				{
+					foreach(curlc, queryEnv->namedRelList) {
+						EphemeralNamedRelation tmp_enr;
+						ListCell *type_lc;
 
-		/* Only process if input type matches aggregate type */
-		if ((*common_utility_plugin_ptr->is_tsql_bpchar_datatype)(expr_type) ||
-			(*common_utility_plugin_ptr->is_tsql_nchar_datatype)(expr_type))
-		{
-			int32	rettypmod = exprTypmod((Node *) te->expr);
+						tmp_enr = (EphemeralNamedRelation) lfirst(curlc);
+						if (tmp_enr->md.enrtype != ENR_TSQL_TEMP)
+							continue;
 
-			if (rettypmod != -1)
-			{
-				AggExp = coerce_to_target_type(pstate, AggExp,
-											 exprType(AggExp),
-											 aggref->aggtype,
-											 rettypmod,
-											 COERCION_IMPLICIT,
-											 COERCE_IMPLICIT_CAST,
-											 -1);
-			}
+						foreach(type_lc, tmp_enr->md.cattups[ENR_CATTUP_TYPE])
+						{
+							Form_pg_type tup = ((Form_pg_type)GETSTRUCT((HeapTuple)lfirst(type_lc)));
+							if (tup->oid == object_id)
+								return tmp_enr;
+						}
+						foreach(type_lc, tmp_enr->md.cattups[ENR_CATTUP_ARRAYTYPE])
+						{
+							Form_pg_type tup = ((Form_pg_type)GETSTRUCT((HeapTuple)lfirst(type_lc)));
+							if (tup->oid == object_id)
+								return tmp_enr;
+						}
+					}
+					break;
+				}
+			case ConstraintRelationId:
+				{
+					foreach(curlc, queryEnv->namedRelList) {
+						EphemeralNamedRelation tmp_enr;
+						ListCell *cons_lc;
+
+						tmp_enr = (EphemeralNamedRelation) lfirst(curlc);
+						if (tmp_enr->md.enrtype != ENR_TSQL_TEMP)
+							continue;
+
+						foreach(cons_lc, tmp_enr->md.cattups[ENR_CATTUP_CONSTRAINT])
+						{
+							Form_pg_constraint tup = ((Form_pg_constraint)GETSTRUCT((HeapTuple)lfirst(cons_lc)));
+							if (tup->oid == object_id)
+								return tmp_enr;
+						}
+					}
+					break;
+				}
+			case AttrDefaultRelationId:
+				{
+					foreach(curlc, queryEnv->namedRelList) {
+						EphemeralNamedRelation tmp_enr;
+						ListCell *attrdef_lc;
+
+						tmp_enr = (EphemeralNamedRelation) lfirst(curlc);
+						if (tmp_enr->md.enrtype != ENR_TSQL_TEMP)
+							continue;
+
+						foreach(attrdef_lc, tmp_enr->md.cattups[ENR_CATTUP_ATTR_DEF_REL])
+						{
+							Form_pg_attrdef tup = ((Form_pg_attrdef)GETSTRUCT((HeapTuple)lfirst(attrdef_lc)));
+							if (tup->oid == object_id)
+								return tmp_enr;
+						}
+					}
+					break;
+				}
+			case SequenceRelationId:
+				{
+					foreach(curlc, queryEnv->namedRelList) {
+						EphemeralNamedRelation tmp_enr;
+						ListCell *seq_lc;
+
+						tmp_enr = (EphemeralNamedRelation) lfirst(curlc);
+						if (tmp_enr->md.enrtype != ENR_TSQL_TEMP)
+							continue;
+
+						foreach(seq_lc, tmp_enr->md.cattups[ENR_CATTUP_SEQUENCE])
+						{
+							Form_pg_sequence tup = ((Form_pg_sequence)GETSTRUCT((HeapTuple)lfirst(seq_lc)));
+							if (tup->seqrelid == object_id)
+								return tmp_enr;
+						}
+					}
+					break;
+				}
+
+			default:
+				break;
 		}
+		queryEnv = queryEnv->parentEnv;
 	}
-	if (aggFuncName)
-		pfree(aggFuncName);
-	return AggExp;
+	return NULL;
 }
 
 static Node*
